@@ -1,8 +1,9 @@
 import os 
 import sys
 
-import random
 import cv2
+import json
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -25,6 +26,13 @@ def fixed_seed(seed: int=1000):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
+def get_json2array(fname) -> np.ndarray:
+    with open(fname, 'r') as f:
+        dataset = json.load(f)
+    dataset = np.array(dataset)
+
+    return dataset
+
 def get_heatmap(fmap, grads, prefix=''):
     cam = np.zeros(fmap.shape[1:], dtype=np.float32)
     grads = grads.reshape([grads.shape[0], -1])
@@ -36,7 +44,7 @@ def get_heatmap(fmap, grads, prefix=''):
     cam /= cam.max()
 
     heatmap = cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET)
-    # heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
 
     return heatmap
 
@@ -64,21 +72,90 @@ def backward_hook(module, grad_in, grad_out):
 def forward_hook(module, input, output):
     feature_block.append(output)
 
-def iterative_FGSM(img, data_grad, eps=0.00001):
-    img = img.to(device)
-    pertubed = img + eps * data_grad.sign()
-    pertubed = torch.clamp(pertubed, 0, 1)
+def iterative_FGSM(dataloader, model, num_iter=10, eps=0.00001, epsilon=1e-8):
+    correct = 0
+    examples = []
+    for idx, (img, target) in enumerate(dataloader):
+        original_img, target = img.to(device), target.to(device)
+        original_img = original_img.view(1, 1, 28, -1)
+        # original_img.requires_grad = True
+        
+        # original_output = model(original_img)
+        # _, original_pred = torch.max(original_output, 1)
 
-    return pertubed
+        perturbed_img = original_img
+        for i in range(num_iter):
+            print("iter: ", i+1)
+            perturbed_img.requires_grad = True
+            output = model(perturbed_img)
+            _, pred = torch.max(output, 1)
+            # idx = np.argmax(output.cpu().data.numpy())
+            loss = F.nll_loss(output, target)
+            model.zero_grad()
+            class_loss = output[0, pred.cpu().data.numpy()]
+            class_loss.backward(retain_graph=True)
+            grad_val = gradient_block[2*i].cpu().detach().numpy().squeeze()
+            fmap = feature_block[i].cpu().detach().numpy().squeeze()
+            heatmap = get_heatmap(fmap, grad_val, i+1)
+            examples.append((pred.item(), perturbed_img.squeeze().detach().cpu().numpy(), heatmap))
+
+            loss.backward()
+            data_grad = perturbed_img.grad
+            perturbed_img = perturbed_img + eps * data_grad.sign()
+            # Clip perturbed image to be within epsilon neighborhood of the original image
+            # perturbed_img.data = torch.max(torch.min(perturbed_img.data, original_img + epsilon), original_img - epsilon)
+            perturbed_img = torch.clamp(perturbed_img, 0, 1)
+            perturbed_img = perturbed_img.detach()
+
+    return examples
 
 def Grad_CAM(model):
     pass
 
+def visualize(examples, num_iter):
+    print("Output analysis figure ...")
+    count = 0
+    plt.figure(figsize=(20, 6))
+    for idx, (pred, perturbed, heatmap) in enumerate(examples):
+        count += 1
+        plt.subplot(2, num_iter, count)
+        plt.xticks([], [])
+        plt.yticks([], [])
+        plt.title(f"pred: {pred}")
+        plt.imshow(perturbed, cmap='gray')
+
+        plt.subplot(2, num_iter, count + num_iter)
+        plt.xticks([], [])
+        plt.yticks([], [])
+        plt.title(f"")
+        plt.imshow(heatmap, )
+
+    plt.tight_layout()
+    plt.savefig('analysis_fig.jpg')
+    print("Finish.")
+
 if __name__ == '__main__':
     fixed_seed()
 
+    dataset = get_json2array("./data/71_data.json")
+    dataset = np.array(dataset).reshape(len(dataset), 1, 28, -1)
+    dataset = (dataset+1) / 2.0
+    sample = torch.from_numpy(dataset[0]).float()
+    target = np.array([6])
+    target = torch.from_numpy(target).long()
+    dataset = TensorDataset(
+        sample,
+        target
+    )
+    data_loader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+    )
+
+    # os._exit(0)
     model = Net().to(device)
-    # model.load_state_dict(torch.load('...', map_location="cpu"))
+    model.load_state_dict(torch.load(f'./mnist_model.pth', map_location="cpu"))
     model.eval()
 
     feature_block = []
@@ -89,3 +166,8 @@ if __name__ == '__main__':
     model.conv1.register_full_backward_hook(backward_hook)
 
     # TODO: Integrating FGSM & Grad CAM
+    eps_list = [0.5, ]
+    num_iter = 10
+    for eps in eps_list:
+        examples = iterative_FGSM(data_loader, model, num_iter=num_iter, eps=eps)
+        visualize(examples, num_iter)
