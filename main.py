@@ -82,26 +82,27 @@ def iterative_FGSM(dataloader, model, num_iter=10, eps=0.00001, epsilon=1e-8):
         
         # original_output = model(original_img)
         # _, original_pred = torch.max(original_output, 1)
-
         perturbed_img = original_img
         for i in range(num_iter):
             print("iter: ", i+1)
             perturbed_img.requires_grad = True
+            # adversarial_optimizer.zero_grad()
             output = model(perturbed_img)
             _, pred = torch.max(output, 1)
-            # idx = np.argmax(output.cpu().data.numpy())
             loss = F.nll_loss(output, target)
+            # idx = np.argmax(output.cpu().data.numpy())
             model.zero_grad()
+            loss.backward(retain_graph=True)
+            data_grad = perturbed_img.grad.sign()
+
             class_loss = output[0, pred.cpu().data.numpy()]
-            class_loss.backward(retain_graph=True)
+            class_loss.backward()
             grad_val = gradient_block[2*i].cpu().detach().numpy().squeeze()
             fmap = feature_block[i].cpu().detach().numpy().squeeze()
             heatmap = get_heatmap(fmap, grad_val, i+1)
             examples.append((pred.item(), perturbed_img.squeeze().detach().cpu().numpy(), heatmap))
 
-            loss.backward()
-            data_grad = perturbed_img.grad
-            perturbed_img = perturbed_img + eps * data_grad.sign()
+            perturbed_img = perturbed_img + eps * data_grad
             # Clip perturbed image to be within epsilon neighborhood of the original image
             # perturbed_img.data = torch.max(torch.min(perturbed_img.data, original_img + epsilon), original_img - epsilon)
             perturbed_img = torch.clamp(perturbed_img, 0, 1)
@@ -112,23 +113,27 @@ def iterative_FGSM(dataloader, model, num_iter=10, eps=0.00001, epsilon=1e-8):
 def Grad_CAM(model):
     pass
 
-def visualize(examples, num_iter):
+def visualize(examples, eps_list, num_iter):
     print("Output analysis figure ...")
     count = 0
-    plt.figure(figsize=(20, 6))
-    for idx, (pred, perturbed, heatmap) in enumerate(examples):
-        count += 1
-        plt.subplot(2, num_iter, count)
-        plt.xticks([], [])
-        plt.yticks([], [])
-        plt.title(f"pred: {pred}")
-        plt.imshow(perturbed, cmap='gray')
+    plt.figure(figsize=(20, 7))
+    for i , eps in enumerate(eps_list):
+        for idx, (pred, perturbed, heatmap) in enumerate(examples):
+        # for idx, (pred, perturbed, ) in enumerate(examples):
+            count += 1
+            plt.subplot(2, num_iter, count)
+            plt.xticks([], [])
+            plt.yticks([], [])
+            if idx == 0:
+                plt.ylabel(f"Epslion: {eps}", fontsize=30)
+            plt.title(f"pred: {pred}", fontsize=40)
+            plt.imshow(perturbed, cmap='gray')
 
-        plt.subplot(2, num_iter, count + num_iter)
-        plt.xticks([], [])
-        plt.yticks([], [])
-        plt.title(f"")
-        plt.imshow(heatmap, )
+            plt.subplot(2, num_iter, count + num_iter)
+            plt.xticks([], [])
+            plt.yticks([], [])
+            plt.title(f"")
+            plt.imshow(heatmap, )
 
     plt.tight_layout()
     plt.savefig('analysis_fig.jpg')
@@ -166,8 +171,8 @@ if __name__ == '__main__':
     model.conv1.register_full_backward_hook(backward_hook)
 
     # TODO: Integrating FGSM & Grad CAM
-    eps_list = [0.5, ]
-    num_iter = 10
+    eps_list = [0.1, ]
+    num_iter = 5
     for eps in eps_list:
         examples = iterative_FGSM(data_loader, model, num_iter=num_iter, eps=eps)
-        visualize(examples, num_iter)
+        visualize(examples, eps_list, num_iter)
