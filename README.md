@@ -1,8 +1,8 @@
-# iterativeFGSM_Grad-Cam
+# iterative FGSM with Grad-Cam
 
 > 2023 Fall Trustworthy AI | Final project
 
-This code provides an analysis of the combination of Fast Gradient Sign Method (FGSM) and Grad-CAM on a pre-trained convolutional neural network (CNN) model for image classification. The goal is to visualize the effect of adversarial perturbations on the model's predictions and understand the regions of the input image that contribute to the predictions.
+This code provides an in-depth analysis of the combination of Fast Gradient Sign Method (FGSM) and Grad-CAM on a pre-trained Convolutional Neural Network (CNN) model for image classification. The primary goal is to visualize the impact of adversarial perturbations on the model's predictions and understand the regions of the input image that contribute to those predictions.
 
 [Proposal Link](https://docs.google.com/presentation/d/1bRs6vrKyGtrYpHoATOGL1PEBbU3CKrGA4j_3ci92NhI/edit#slide=id.g29d0d875cfb_0_5)
 
@@ -16,6 +16,7 @@ NumPy
 OpenCV
 Matplotlib
 tqdm
+skimage
 
 ```bash
 pip install -r requirements.txt
@@ -42,7 +43,8 @@ After running the code, an analysis figure (analysis_fig.jpg) will be generated,
 * eps_list: List of epsilon values for adversarial perturbations.
 * num_iter: Number of iterations for iterative FGSM.
 * threshold: Threshold for creating the CAM mask.
-* mode: Color mode for CAM mask ('rgb' or 'gray').
+* mask_mode: Color mode for CAM mask ('rgb' or 'gray').
+* noise_mode: Noise calculation mode for imgaes ('mse', 'ssi', 'euc').
 
 ### Ref
 [www.shcas.net/jsjyup/2022/7](https://www.shcas.net/jsjyup/pdf/2022/7/%E5%9F%BA%E4%BA%8EGrad-CAM%E7%9A%84Mask-FGSM%E5%AF%B9%E6%8A%97%E6%A0%B7%E6%9C%AC%E6%94%BB%E5%87%BB.pdf)
