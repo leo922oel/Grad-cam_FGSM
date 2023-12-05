@@ -111,26 +111,27 @@ def CAM_mask(heatmap, threshold, mode: str=['rgb', 'gray']):
     mask = torch.from_numpy(mask).long()
     return mask
 
-def iterative_FGSM(dataloader, model, num_iter=10, eps=0.00001, threshold=225, mask_mode='gray', noise_mode='mse', epsilon=1e-8):
-    correct = 0
+def iterative_FGSM(dataloader, model, eps=0.00001, threshold=255, mask_mode='gray', noise_mode='mse', epsilon=1e-8):
+    n_correct = 0
     examples = []
+    iter_lst = []
     for idx, (img, target) in enumerate(dataloader):
+        print("idx:", idx)
         original_img, target = img.to(device), target.to(device)
         original_img = original_img.view(1, 1, 28, -1)
         original_img.requires_grad = True
 
         output = model(original_img)
-        _, pred = torch.max(output, 1)
+        _, original_pred = torch.max(output, 1)
         loss = F.nll_loss(output, target)
         model.zero_grad()
-        # loss.backward(retain_graph=True)
         loss.backward()
         heatmap_lst = []
         for _ in range(2):
             grad_val = gradient_block.pop().cpu().detach().numpy().squeeze()
             fmap = feature_block.pop(0).cpu().detach().numpy().squeeze()
             heatmap_lst.append(get_heatmap(fmap, grad_val))
-        examples.append((pred.item(), original_img.squeeze().detach().cpu().numpy(), heatmap_lst[0], heatmap_lst[1]))
+        examples.append((original_pred.item(), original_img.squeeze().detach().cpu().numpy(), heatmap_lst[0], heatmap_lst[1]))
         heatmap_lst.clear()
 
         # Full FGSM
@@ -140,7 +141,6 @@ def iterative_FGSM(dataloader, model, num_iter=10, eps=0.00001, threshold=225, m
         _, pred = torch.max(output, 1)
         loss = F.nll_loss(output, target)
         model.zero_grad()
-        # loss.backward(retain_graph=True)
         loss.backward()
         for _ in range(2):
             grad_val = gradient_block.pop().cpu().detach().numpy().squeeze()
@@ -150,10 +150,11 @@ def iterative_FGSM(dataloader, model, num_iter=10, eps=0.00001, threshold=225, m
         heatmap_lst.clear()
         
         full_FGSM_noise = calculate_perturbed(original_img, full_perturbed_img, noise_mode)
+        print("Full FGSM noise: ", full_FGSM_noise)
         tmp_noise = 0
-        i = 0
+        num_iter = 0
         perturbed_img = original_img
-        while full_FGSM_noise >  tmp_noise:
+        while full_FGSM_noise >  tmp_noise and num_iter <= 100:
             iter_noise = tmp_noise
             heatmap_lst.clear()
             perturbed_img.requires_grad = True
@@ -161,27 +162,28 @@ def iterative_FGSM(dataloader, model, num_iter=10, eps=0.00001, threshold=225, m
             _, pred = torch.max(output, 1)
             loss = F.nll_loss(output, target)
             model.zero_grad()
-            # loss.backward(retain_graph=True)
             loss.backward()
             for _ in range(2):
                 grad_val = gradient_block.pop().cpu().detach().numpy().squeeze()
                 fmap = feature_block.pop(0).cpu().detach().numpy().squeeze()
                 heatmap_lst.append(get_heatmap(fmap, grad_val))
-            if i > 0:
+            if num_iter > 0:
                 examples.append((pred.item(), perturbed_img.squeeze().detach().cpu().numpy(), heatmap_lst[0], heatmap_lst[1]))
 
             mask = CAM_mask(heatmap_lst[0], threshold, mode=mask_mode)
             mask = mask.to(device)
-
             perturbed_img = get_perturbed(perturbed_img, mask, eps)
             tmp_noise = calculate_perturbed(original_img, perturbed_img, noise_mode)
-            i += 1
-            print("iterative FGSM noise: ", tmp_noise)
-        print("iter: ", i)
-        print("Full FGSM noise: ", full_FGSM_noise)
+            num_iter += 1
+
+        if original_pred != pred: n_correct += 1
+
+        print("iter: ", num_iter-1)
         print("iterative FGSM noise: ", iter_noise)
-            
-    return examples
+        iter_lst.append(num_iter-1)
+    print("adv:", n_correct / len(dataloader))
+
+    return examples, iter_lst
 
 def visualize(examples, eps_list, num_iter, fname='analysis_fig.jpg'):
     print("===== Output analysis figure =====")
@@ -203,6 +205,7 @@ def visualize(examples, eps_list, num_iter, fname='analysis_fig.jpg'):
                 plt.title(f"FGSM\npred: {pred}", fontsize=40)
             else:
                 plt.title(f"iFGSM\npred: {pred}", fontsize=40)
+                plt.ylabel(f"# of iter: {num_iter}", fontsize=30)
             plt.imshow(perturbed, cmap='gray')
 
             plt.subplot(row, 3, count + 3)
@@ -235,14 +238,14 @@ if __name__ == '__main__':
         sample,
         target
     )
-    data_loader = DataLoader(
+    dataloader = DataLoader(
         dataset,
         batch_size=1,
         shuffle=False,
     )
 
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
+        [transforms.ToTensor()]
     )
     valid_data = datasets.MNIST(
         root='./mnist',
@@ -270,14 +273,14 @@ if __name__ == '__main__':
     model.conv2.register_full_backward_hook(backward_hook)
 
     # TODO: Integrating FGSM & Grad CAM
-    eps_list = [0.2, ]
-    num_iter = 5
-    threshold = 180
+    eps_list = [0.1, ]
+    threshold = 100
     # mode: 'rgb', 'gray'
     mask_mode = 'rgb'
     # mode: 'mse', 'ssi', 'euc'
     noise_mode = 'ssi'
 
     for eps in eps_list:
-        examples = iterative_FGSM(data_loader, model, num_iter=num_iter, eps=eps, threshold=threshold, mask_mode=mask_mode, noise_mode=noise_mode)
-        visualize(examples, eps_list, num_iter)
+        examples, iter_lst = iterative_FGSM(valid_dataloader, model, eps=eps, threshold=threshold, mask_mode=mask_mode, noise_mode=noise_mode)
+        # visualize(examples, eps_list, iter_lst[0])
+    print(f"iter: {np.mean(iter_lst)} \u00B1 {np.std(iter_lst)}")
