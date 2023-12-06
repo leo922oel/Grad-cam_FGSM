@@ -7,13 +7,15 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-
 from skimage.metrics import structural_similarity as ssim
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 from torchvision import datasets, transforms
+
+from plot import Comp_Full_Iter, show_iter
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -95,8 +97,6 @@ def calculate_perturbed(img1, img2, mode: str=['mse', 'ssi', 'euc']):
 def get_perturbed(img, mask, eps):
     data_grad = img.grad.sign()
     perturbed_img = img + eps * data_grad * mask if mask is not None else img + eps * data_grad
-    # Clip perturbed image to be within epsilon neighborhood of the original image
-    # perturbed_img.data = torch.max(torch.min(perturbed_img.data, original_img + epsilon), original_img - epsilon)
     perturbed_img = torch.clamp(perturbed_img, 0, 1)
     return perturbed_img.detach()
 
@@ -111,10 +111,11 @@ def CAM_mask(heatmap, threshold, mode: str=['rgb', 'gray']):
     mask = torch.from_numpy(mask).long()
     return mask
 
-def iterative_FGSM(dataloader, model, eps=0.00001, threshold=255, mask_mode='gray', noise_mode='mse', epsilon=1e-8):
+def iterative_FGSM(dataloader, model, eps=0.00001, threshold=255, mask_mode='gray', noise_mode='mse', mask_layer=0):
     n_correct = 0
     examples = []
     iter_lst = []
+    noise_lst = []
     for idx, (img, target) in enumerate(dataloader):
         print("idx:", idx)
         original_img, target = img.to(device), target.to(device)
@@ -154,6 +155,7 @@ def iterative_FGSM(dataloader, model, eps=0.00001, threshold=255, mask_mode='gra
         tmp_noise = 0
         num_iter = 0
         perturbed_img = original_img
+        i_noise = []
         while full_FGSM_noise >  tmp_noise and num_iter <= 100:
             iter_noise = tmp_noise
             heatmap_lst.clear()
@@ -168,62 +170,24 @@ def iterative_FGSM(dataloader, model, eps=0.00001, threshold=255, mask_mode='gra
                 fmap = feature_block.pop(0).cpu().detach().numpy().squeeze()
                 heatmap_lst.append(get_heatmap(fmap, grad_val))
             if num_iter > 0:
+                i_noise.append(iter_noise)
                 examples.append((pred.item(), perturbed_img.squeeze().detach().cpu().numpy(), heatmap_lst[0], heatmap_lst[1]))
 
-            mask = CAM_mask(heatmap_lst[0], threshold, mode=mask_mode)
+            mask = CAM_mask(heatmap_lst[mask_layer], threshold, mode=mask_mode)
             mask = mask.to(device)
             perturbed_img = get_perturbed(perturbed_img, mask, eps)
             tmp_noise = calculate_perturbed(original_img, perturbed_img, noise_mode)
             num_iter += 1
 
         if original_pred != pred: n_correct += 1
-
         print("iter: ", num_iter-1)
         print("iterative FGSM noise: ", iter_noise)
         iter_lst.append(num_iter-1)
+        noise_lst.append(i_noise)
+
     print("adv:", n_correct / len(dataloader))
 
-    return examples, iter_lst
-
-def visualize(examples, eps_list, num_iter, fname='analysis_fig.jpg'):
-    print("===== Output analysis figure =====")
-    count = 0
-    plt.figure(figsize=(20, 11))
-    row = len(examples[0]) - 1
-    for i , eps in enumerate(eps_list):
-        for idx, (pred, perturbed, heatmap1, heatmap2) in enumerate(examples):
-            if (idx not in [0, 1, len(examples)-1]):
-                continue
-            count += 1
-            plt.subplot(row, 3, count)
-            plt.xticks([], [])
-            plt.yticks([], [])
-            if idx == 0:
-                plt.ylabel(f"Original", fontsize=30)
-            elif idx == 1:
-                plt.ylabel(f"Epslion: {eps}", fontsize=30)
-                plt.title(f"FGSM\npred: {pred}", fontsize=40)
-            else:
-                plt.title(f"iFGSM\npred: {pred}", fontsize=40)
-                plt.ylabel(f"# of iter: {num_iter}", fontsize=30)
-            plt.imshow(perturbed, cmap='gray')
-
-            plt.subplot(row, 3, count + 3)
-            plt.xticks([], [])
-            plt.yticks([], [])
-            plt.title(f"")
-            plt.imshow(heatmap1, )
-
-            plt.subplot(row, 3, count + 3*2)
-            # heatmap2 = cv2.cvtColor(heatmap2, cv2.COLOR_RGB2GRAY)
-            plt.xticks([], [])
-            plt.yticks([], [])
-            plt.title(f"")
-            plt.imshow(heatmap2)
-
-    plt.tight_layout()
-    plt.savefig(fname)
-    print("===== Finish =====")
+    return examples, iter_lst, noise_lst
 
 if __name__ == '__main__':
     fixed_seed()
@@ -273,14 +237,18 @@ if __name__ == '__main__':
     model.conv2.register_full_backward_hook(backward_hook)
 
     # TODO: Integrating FGSM & Grad CAM
-    eps_list = [0.1, ]
+    eps_list = [0.2, ]
     threshold = 100
     # mode: 'rgb', 'gray'
     mask_mode = 'rgb'
+    mask_layer = 0
     # mode: 'mse', 'ssi', 'euc'
     noise_mode = 'ssi'
 
     for eps in eps_list:
-        examples, iter_lst = iterative_FGSM(valid_dataloader, model, eps=eps, threshold=threshold, mask_mode=mask_mode, noise_mode=noise_mode)
-        # visualize(examples, eps_list, iter_lst[0])
+        examples, iter_lst, noise_lst = iterative_FGSM(dataloader, model, eps=eps, threshold=threshold, mask_mode=mask_mode, noise_mode=noise_mode, mask_layer=mask_layer)
+        Comp_Full_Iter(examples, eps_list, iter_lst[0])
+        tmp_exp = examples.copy()
+        tmp_exp.pop(1)
+        show_iter(tmp_exp, eps_list)
     print(f"iter: {np.mean(iter_lst)} \u00B1 {np.std(iter_lst)}")

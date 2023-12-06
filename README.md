@@ -5,6 +5,7 @@
 This code provides an in-depth analysis of the combination of Fast Gradient Sign Method (FGSM) and Grad-CAM on a pre-trained Convolutional Neural Network (CNN) model for image classification. The primary goal is to visualize the impact of adversarial perturbations on the model's predictions and understand the regions of the input image that contribute to those predictions.
 
 [Proposal Link](https://docs.google.com/presentation/d/1bRs6vrKyGtrYpHoATOGL1PEBbU3CKrGA4j_3ci92NhI/edit#slide=id.g29d0d875cfb_0_5)
+[Final Project Presentation](https://docs.google.com/presentation/d/13yvNk-oImNNaP5vGvdlAyMPOwiBBXOx253MMO42EWRI/edit?usp=sharing)
 
 ## Prerequisites
 
