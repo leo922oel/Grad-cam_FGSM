@@ -4,9 +4,9 @@ def Comp_Full_Iter(examples, eps_list, num_iter, fname='comp_full_iter.jpg'):
     print("===== Output Full & Iteration Comp. =====")
     count = 0
     plt.figure(figsize=(20, 11))
-    row = len(examples[0]) - 1
+    row = len(examples[0]) - 2
     for i , eps in enumerate(eps_list):
-        for idx, (pred, perturbed, heatmap1, heatmap2) in enumerate(examples):
+        for idx, (pred, perturbed, heatmap1, heatmap2, _) in enumerate(examples):
             if (idx not in [0, 1, len(examples)-1]):
                 continue
             count += 1
@@ -44,10 +44,10 @@ def show_iter(examples, eps_list, fname='show_iter.jpg'):
     print("===== Output Iteration display =====")
     count = 0
     plt.figure(figsize=(20, 11))
-    row = len(examples[0]) - 1
+    row = len(examples[0]) - 2
     num_iter = len(examples)
     for i , eps in enumerate(eps_list):
-        for idx, (pred, perturbed, heatmap1, heatmap2) in enumerate(examples):
+        for idx, (pred, perturbed, heatmap1, heatmap2, _) in enumerate(examples):
             count += 1
             plt.subplot(row, num_iter, count)
             plt.xticks([], [])
@@ -76,6 +76,7 @@ def show_iter(examples, eps_list, fname='show_iter.jpg'):
     plt.savefig(fname)
     print("===== Finish =====")
 
+# TODO
 def noise_plot(examples, noises, fname='noises_plot.jpg'):
     print("===== Output analysis figure =====")
     count = 0
@@ -108,6 +109,41 @@ def noise_plot(examples, noises, fname='noises_plot.jpg'):
             plt.yticks([], [])
             plt.title(f"")
             plt.imshow(heatmap2)
+
+    plt.tight_layout()
+    plt.savefig(fname)
+    print("===== Finish =====")
+
+def show_mask(examples, fname="Mask_demon.jpg"):
+    print("===== Output mask demonstration =====")
+    count = 0
+    plt.figure(figsize=(20, 11))
+    row = len(examples[0])-2
+    num_iter = len(examples)
+    for idx, (_, perturbed, heatmap1, _, mask) in enumerate(examples):
+        count += 1
+        plt.subplot(row, num_iter, count)
+        plt.xticks([], [])
+        plt.yticks([], [])
+        if idx == 0:
+            plt.ylabel(f"Perturbed Iamge", fontsize=30)
+        plt.imshow(perturbed, cmap='gray')
+
+        plt.subplot(row, num_iter, count + num_iter*1)
+        if idx == 0:
+            plt.ylabel("Grad CAM", fontsize=30)
+        plt.xticks([], [])
+        plt.yticks([], [])
+        plt.title(f"")
+        plt.imshow(heatmap1, )
+
+        plt.subplot(row, num_iter, count + num_iter*2)
+        if idx == 0:
+            plt.ylabel("Mask", fontsize=30)
+        plt.xticks([], [])
+        plt.yticks([], [])
+        plt.title(f"")
+        plt.imshow(mask, cmap="gray")
 
     plt.tight_layout()
     plt.savefig(fname)
