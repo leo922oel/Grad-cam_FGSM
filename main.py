@@ -92,7 +92,7 @@ def calculate_perturbed(img1, img2, mode: str=['mse', 'ssi', 'euc']):
         img1_np = img1.cpu().squeeze().detach().numpy()
         img2_np = img2.cpu().squeeze().detach().numpy()
         loss, _ = ssim(img1_np, img2_np, full=True, data_range=img1_np.max() - img1_np.min())
-        # loss = 1 / loss
+        loss = 1 / loss
     elif mode == "euc":
         loss = torch.norm(img1 - img2).item()
     else:
@@ -129,7 +129,7 @@ def CAM_mask(heatmap, threshold, mode: str=['rgb', 'gray']):
 
 def Full_FGSM(dataloader, model, num_block=2, eps=0.00001, noise_mode='mse'):
     correct = 0
-    adversial = 0
+    adversarial = 0
     examples = []
     noise_lst = []
     # for idx, (img, target) in tqdm(enumerate(dataloader), ):
@@ -162,31 +162,24 @@ def Full_FGSM(dataloader, model, num_block=2, eps=0.00001, noise_mode='mse'):
         correct += int(original_pred == target)
         
         full_FGSM_noise = calculate_perturbed(original_img, full_perturbed_img, noise_mode)
-        # print("Full FGSM noise: ", full_FGSM_noise)
         if (original_pred == target) and (original_pred != pred):
             noise_lst.append((1-full_FGSM_noise)/2)
-            adversial += 1
-        # adversial += int((original_pred == target) and (original_pred != pred))
-        # adv_correct += int((pred == target))
+            adversarial += 1
 
-    print("adversial success rate: ", adversial / correct)
-    # asr.append(adversial / correct)
-    # print(f"correct: ", correct / len(dataloader))
+    print("adversarial success rate: ", adversarial / correct)
+    # asr.append(adversarial / correct)
     
     return noise_lst
 
 
 def iterative_FGSM(dataloader, model, num_block=2, eps=0.00001, threshold=255, mask_mode='only_r', noise_mode='mse', mask_layer=0, iter_feet=1):
     correct = 0
-    adv_correct = 0
-    adversial = 0
+    adversarial = 0
     examples = []
     iter_lst = []
     noise_lst = []
     asr = []
-    # for idx, (img, target) in enumerate(dataloader):
     for (img, target) in tqdm(dataloader, desc="ADV"):
-        # print("idx:", idx)
         original_img, target = img.to(device), target.to(device)
         original_img = original_img.view(1, 1, 28, -1)
         original_img.requires_grad = True
@@ -218,12 +211,11 @@ def iterative_FGSM(dataloader, model, num_block=2, eps=0.00001, threshold=255, m
         # print("Full FGSM noise: ", full_FGSM_noise)
 
         tmp_noise = 0
-        num_iter = 0
+        num_iter = -1
         perturbed_img = original_img
         i_noise = []
-        pred=original_pred
-        # while full_FGSM_noise >  tmp_noise and num_iter <= 100:
-        while pred == original_pred and original_pred == target and num_iter <= 100:
+        while full_FGSM_noise >  tmp_noise and (original_pred == target) and (original_pred != pred) and num_iter <= 100:
+            num_iter += 1
             iter_noise = tmp_noise
             heatmap_lst.clear()
             perturbed_img.requires_grad = True
@@ -241,20 +233,17 @@ def iterative_FGSM(dataloader, model, num_block=2, eps=0.00001, threshold=255, m
             mask = mask.to(device)
             perturbed_img, m = get_perturbed(perturbed_img, mask, eps/iter_feet)
             tmp_noise = calculate_perturbed(original_img, perturbed_img, noise_mode)
-            num_iter += 1
 
         # print("iterative FGSM noise: ", iter_noise)
         # print("iter: ", num_iter-1)
-        iter_lst.append(num_iter-1)
+        iter_lst.append(num_iter)
         if (original_pred == target) and (original_pred != pred):
-            noise_lst.append((1-i_noise[-1])/2)
-            adversial += 1
-        # adversial += int((original_pred == target) and (original_pred != pred))
-        # adv_correct += int((pred == target))
+            noise_lst.append((1-1/i_noise[-1])/2)
+            adversarial += 1
 
-    print("adversial success rate: ", adversial / correct)
-    asr.append(adversial / correct)
-    # print("adversial success rate:", adv_correct / len(dataloader))
+    print("adversarial success rate: ", adversarial / correct)
+    asr.append(adversarial / correct)
+    # print("adversarial success rate:", adv_correct / len(dataloader))
 
     return examples, iter_lst, noise_lst, asr
 
