@@ -46,6 +46,7 @@ def show_iter(examples, eps_list, fname='show_iter.jpg'):
     plt.figure(figsize=(20, 11))
     row = len(examples[0]) - 2
     num_iter = len(examples)
+    num_iter = min(num_iter, 10)
     for i , eps in enumerate(eps_list):
         for idx, (pred, perturbed, heatmap1, heatmap2, _) in enumerate(examples):
             count += 1
@@ -83,6 +84,7 @@ def noise_plot(examples, noises, fname='noises_plot.jpg'):
     plt.figure(figsize=(20, 11))
     row = len(examples[0]) - 1
     num_iter = len(examples)
+    num_iter = min(num_iter, 10)
     for i , eps in enumerate(eps_list):
         for idx, (pred, perturbed, heatmap1, heatmap2) in enumerate(examples):
             if (idx not in [0, 1, len(examples)-1]):
@@ -120,7 +122,9 @@ def show_mask(examples, fname="Mask_demon.jpg"):
     plt.figure(figsize=(20, 11))
     row = len(examples[0])-2
     num_iter = len(examples)
+    num_iter = min(num_iter, 10)
     for idx, (_, perturbed, heatmap1, _, mask) in enumerate(examples):
+        if idx >= 10: break
         count += 1
         plt.subplot(row, num_iter, count)
         plt.xticks([], [])
@@ -136,6 +140,8 @@ def show_mask(examples, fname="Mask_demon.jpg"):
         plt.yticks([], [])
         plt.title(f"")
         plt.imshow(heatmap1, )
+        # if idx == len(examples)-1:
+            # plt.colorbar()
 
         plt.subplot(row, num_iter, count + num_iter*2)
         if idx == 0:
@@ -143,8 +149,21 @@ def show_mask(examples, fname="Mask_demon.jpg"):
         plt.xticks([], [])
         plt.yticks([], [])
         plt.title(f"")
-        plt.imshow(mask, cmap="gray")
+        plt.imshow(mask, cmap='gray')
 
     plt.tight_layout()
     plt.savefig(fname)
     print("===== Finish =====")
+
+def box(eps_list, noise_list, asr_list, fname="box.jpg"):
+    print("===== Output Full & Iteration Comp. =====")
+    print(noise_list)
+    plt.figure(figsize=(20, 11))
+    plt.boxplot(x=asr_list, y=noise_list,)
+    plt.legend(eps_list)
+
+    plt.tight_layout()
+    plt.savefig(fname)
+    print("===== Finish =====")
+
+# def dot():

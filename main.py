@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 from torchvision import datasets, transforms
 
-from plot import Comp_Full_Iter, show_iter, show_mask
+from plot import Comp_Full_Iter, show_iter, show_mask, box
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -92,7 +92,7 @@ def calculate_perturbed(img1, img2, mode: str=['mse', 'ssi', 'euc']):
         img1_np = img1.cpu().squeeze().detach().numpy()
         img2_np = img2.cpu().squeeze().detach().numpy()
         loss, _ = ssim(img1_np, img2_np, full=True, data_range=img1_np.max() - img1_np.min())
-        loss = 1 / loss
+        # loss = 1 / loss
     elif mode == "euc":
         loss = torch.norm(img1 - img2).item()
     else:
@@ -109,12 +109,21 @@ def get_perturbed(img, mask, eps):
 
 def CAM_mask(heatmap, threshold, mode: str=['rgb', 'gray']):
     if mode == 'rgb':
-        mask = heatmap[:, :, 0]
+        r = heatmap[:, :, 0]
+        r = (r == 255)
+        g = heatmap[:, :, 1]
+        g = (g <= threshold)
+        b = heatmap[:, :, 2]
+        b = (b == 0)
+        mask = (r & g & b).astype(np.int8)
     elif mode == 'gray':
         mask = cv2.cvtColor(heatmap, cv2.COLOR_RGB2GRAY)
+        mask = (mask >= threshold).astype(np.int8)
+    elif mode == 'only_r':
+        r = heatmap[:, :, 0]
+        mask = (r >= threshold).astype(np.int8)
     else: ValueError('Mode of CAM mask error.')
 
-    mask = (mask >= threshold).astype(np.int8)
     mask = torch.from_numpy(mask).long()
     return mask
 
@@ -150,22 +159,31 @@ def Full_FGSM(dataloader, model, num_block=2, eps=0.00001, noise_mode='mse'):
         get_heatmap(heatmap_lst, num_block)
         examples.append((pred.item(), full_perturbed_img.squeeze().detach().cpu().numpy(), heatmap_lst[0], heatmap_lst[1], m))
         heatmap_lst.clear()
-        correct += int(pred == target)
+        correct += int(original_pred == target)
         
         full_FGSM_noise = calculate_perturbed(original_img, full_perturbed_img, noise_mode)
-        print("Full FGSM noise: ", full_FGSM_noise)
-    print(f"correct: ", correct / len(dataloader))
+        # print("Full FGSM noise: ", full_FGSM_noise)
+        if (original_pred == target) and (original_pred != pred):
+            noise_lst.append((1-full_FGSM_noise)/2)
+            adversial += 1
+        # adversial += int((original_pred == target) and (original_pred != pred))
+        # adv_correct += int((pred == target))
+
+    print("adversial success rate: ", adversial / correct)
+    # asr.append(adversial / correct)
+    # print(f"correct: ", correct / len(dataloader))
     
-    return
+    return noise_lst
 
 
-def iterative_FGSM(dataloader, model, num_block=2, eps=0.00001, threshold=255, mask_mode='gray', noise_mode='mse', mask_layer=0, iter_feet=1):
+def iterative_FGSM(dataloader, model, num_block=2, eps=0.00001, threshold=255, mask_mode='only_r', noise_mode='mse', mask_layer=0, iter_feet=1):
     correct = 0
     adv_correct = 0
     adversial = 0
     examples = []
     iter_lst = []
     noise_lst = []
+    asr = []
     # for idx, (img, target) in enumerate(dataloader):
     for (img, target) in tqdm(dataloader, desc="ADV"):
         # print("idx:", idx)
@@ -203,7 +221,9 @@ def iterative_FGSM(dataloader, model, num_block=2, eps=0.00001, threshold=255, m
         num_iter = 0
         perturbed_img = original_img
         i_noise = []
-        while full_FGSM_noise >  tmp_noise and num_iter <= 100:
+        pred=original_pred
+        # while full_FGSM_noise >  tmp_noise and num_iter <= 100:
+        while pred == original_pred and original_pred == target and num_iter <= 100:
             iter_noise = tmp_noise
             heatmap_lst.clear()
             perturbed_img.requires_grad = True
@@ -215,7 +235,7 @@ def iterative_FGSM(dataloader, model, num_block=2, eps=0.00001, threshold=255, m
             get_heatmap(heatmap_lst, num_block)
             if num_iter > 0:
                 i_noise.append(iter_noise)
-                examples.append((pred.item(), perturbed_img.squeeze().detach().cpu().numpy(), heatmap_lst[0], heatmap_lst[1], m.squeeze().detach().cpu().numpy()))
+                examples.append((pred.item(), perturbed_img.squeeze().detach().cpu().numpy(), heatmap_lst[0], heatmap_lst[1], mask.squeeze().detach().cpu().numpy()))
 
             mask = CAM_mask(heatmap_lst[mask_layer], threshold, mode=mask_mode)
             mask = mask.to(device)
@@ -224,16 +244,19 @@ def iterative_FGSM(dataloader, model, num_block=2, eps=0.00001, threshold=255, m
             num_iter += 1
 
         # print("iterative FGSM noise: ", iter_noise)
-        print("iter: ", num_iter-1)
+        # print("iter: ", num_iter-1)
         iter_lst.append(num_iter-1)
-        noise_lst.append(i_noise)
-        adversial += int((original_pred == target) and (original_pred != pred))
-        adv_correct += int((pred == target))
+        if (original_pred == target) and (original_pred != pred):
+            noise_lst.append((1-i_noise[-1])/2)
+            adversial += 1
+        # adversial += int((original_pred == target) and (original_pred != pred))
+        # adv_correct += int((pred == target))
 
     print("adversial success rate: ", adversial / correct)
+    asr.append(adversial / correct)
     # print("adversial success rate:", adv_correct / len(dataloader))
 
-    return examples, iter_lst, noise_lst
+    return examples, iter_lst, noise_lst, asr
 
 if __name__ == '__main__':
     fixed_seed()
@@ -285,22 +308,28 @@ if __name__ == '__main__':
     # TODO: Integrating FGSM & Grad CAM
     eps_list = [0.05, 0.1, 0.15]
     num_block = 2
-    threshold = 100
-    # mode: 'rgb', 'gray'
-    mask_mode = 'rgb'
+    threshold = 0
+    # mode: 'rgb', 'gray', 'only_r'
+    mask_mode = 'only_r'
     mask_layer = 0
     # mode: 'mse', 'ssi', 'euc'
     noise_mode = 'ssi'
-    iter_feet = 1
+    iter_feet = 40
 
+    noise_lst = []
+    asr_lst = []
     for eps in eps_list:
         print(f"eps: ", eps)
         # print(f"dataset size: ", len(valid_dataloader))
-        # Full_FGSM(valid_dataloader, model, num_block=num_block, eps=eps, noise_mode=noise_mode)
-        examples, iter_lst, noise_lst = iterative_FGSM(dataloader, model, num_block=num_block, eps=eps, threshold=threshold, mask_mode=mask_mode, noise_mode=noise_mode, mask_layer=mask_layer, iter_feet=iter_feet)
-        show_mask(examples,)
+        # noise = Full_FGSM(valid_dataloader, model, num_block=num_block, eps=eps, noise_mode=noise_mode)
+        examples, iter_lst, noise, asr = iterative_FGSM(valid_dataloader, model, num_block=num_block, eps=eps, threshold=threshold, mask_mode=mask_mode, noise_mode=noise_mode, mask_layer=mask_layer, iter_feet=iter_feet)
+        noise_lst.append(noise)
+        # asr_lst.append(asr)
+        # show_mask(examples,)
         # Comp_Full_Iter(examples, eps_list, iter_lst[0])
         # tmp_exp = examples.copy()
         # tmp_exp.pop(1)
         # show_iter(tmp_exp, eps_list)
-        print(f"iter: {np.mean(iter_lst)} \u00B1 {np.std(iter_lst)}")
+        # print(f"iter: {np.mean(iter_lst)} \u00B1 {np.std(iter_lst)}")
+        print(f"SSIMD: {np.mean(noise)} \u00B1 {np.std(noise)}")
+    # box(eps_list, noise_lst, asr_lst)
